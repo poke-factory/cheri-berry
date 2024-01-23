@@ -23,15 +23,13 @@ go run main.go
 - [x] npm publish
 - [x] npm install
 - [x] npm adduser
+- [x] npm whoami
+- [x] npm unpublish
 
 # TODO
-
 - [ ] npm search
-- [ ] npm unpublish
 - [ ] npm deprecate
 - [ ] npm star
-- [ ] npm login
-- [ ] npm whoami
 - [ ] npm owner
 - [ ] npm access
 - [ ] npm token

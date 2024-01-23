@@ -68,3 +68,8 @@ func Login(c *gin.Context) {
 func Logout(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": "you are logged out"})
 }
+
+func GetUserInfo(c *gin.Context) {
+	username, _ := c.Get("username")
+	c.JSON(http.StatusOK, gin.H{"username": username})
+}

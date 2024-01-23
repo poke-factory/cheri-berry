@@ -13,7 +13,7 @@ type UploadPackageRequest struct {
 		Description string            `json:"description"`
 		Main        string            `json:"main"`
 		Scripts     map[string]string `json:"scripts"`
-		Author      string            `json:"author"`
+		Author      interface{}       `json:"author"`
 		License     string            `json:"license"`
 		Readme      string            `json:"readme"`
 		ID          string            `json:"_id"`

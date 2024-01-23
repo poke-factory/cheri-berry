@@ -5,11 +5,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/Masterminds/semver/v3"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/poke-factory/cheri-berry/internal/requests"
 	"github.com/poke-factory/cheri-berry/internal/storage"
 	"golang.org/x/net/context"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -22,16 +25,6 @@ type PackageJson struct {
 	DistTags struct {
 		Latest string `json:"latest"`
 	} `json:"dist-tags"`
-	Distfiles struct {
-		Demo001Tgz struct {
-			Url string `json:"url"`
-			Sha string `json:"sha"`
-		} `json:"demo-0.0.1.tgz"`
-		Demo0110Tgz struct {
-			Url string `json:"url"`
-			Sha string `json:"sha"`
-		} `json:"demo-0.1.10.tgz"`
-	} `json:"_distfiles"`
 	Attachments map[string]struct {
 		Shasum string `json:"shasum"`
 	} `json:"_attachments"`
@@ -108,9 +101,13 @@ func UploadPackage(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		pkgJson = convertPkgJson(request, &pkgJson)
+		pkgJson, err = convertPkgJson(request, &pkgJson)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 	} else {
-		pkgJson = convertPkgJson(request, nil)
+		pkgJson, _ = convertPkgJson(request, nil)
 	}
 	pkgJsonStr, err := json.Marshal(pkgJson)
 	if err != nil {
@@ -140,6 +137,86 @@ func UploadPackage(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "package uploaded"})
+}
+
+func DeletePackageInfo(c *gin.Context) {
+	packageName := c.Param("package")
+	packageJsonFile := fmt.Sprintf("cheri-berry/%s/package.json", packageName)
+	exits, err := storage.Storage.Exists(context.Background(), packageJsonFile)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !exits {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "package does not exist"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": "found package"})
+}
+
+func DeletePackage(c *gin.Context) {
+	packageName := c.Param("package")
+	fileName := c.Param("file")
+
+	err := storage.Storage.Delete(context.TODO(), fmt.Sprintf("cheri-berry/%s/%s", packageName, fileName))
+
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	packageJsonFile := fmt.Sprintf("cheri-berry/%s/package.json", packageName)
+
+	f, err := storage.Storage.GetBytes(context.Background(), packageJsonFile)
+
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var pkgJson PackageJson
+	err = json.Unmarshal(f, &pkgJson)
+
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	delVersion := strings.Replace(fileName, ".tgz", "", 1)
+	delVersion = strings.Replace(delVersion, pkgJson.Name+"-", "", 1)
+
+	delete(pkgJson.Versions, delVersion)
+	delete(pkgJson.Time, delVersion)
+	delete(pkgJson.Attachments, fileName)
+
+	if delVersion == pkgJson.DistTags.Latest {
+		pkgJson.DistTags.Latest = ""
+		for version := range pkgJson.Versions {
+			if pkgJson.DistTags.Latest == "" {
+				pkgJson.DistTags.Latest = version
+			} else {
+				v1, _ := semver.NewVersion(pkgJson.DistTags.Latest)
+				v2, _ := semver.NewVersion(version)
+				if v2.GreaterThan(v1) {
+					pkgJson.DistTags.Latest = version
+				}
+			}
+		}
+	}
+
+	pkgJsonStr, err := json.Marshal(pkgJson)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	r := bytes.NewReader(pkgJsonStr)
+	err = storage.Storage.Put(context.TODO(), packageJsonFile, r)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "package deleted"})
 }
 
 func GetPackageInfo(c *gin.Context) {
@@ -198,10 +275,11 @@ func GetPackageFile(c *gin.Context) {
 	c.Data(http.StatusOK, "application/octet-stream", content)
 }
 
-func convertPkgJson(req requests.UploadPackageRequest, packageJson *PackageJson) PackageJson {
+func convertPkgJson(req requests.UploadPackageRequest, packageJson *PackageJson) (PackageJson, error) {
 	var pkgJson PackageJson
 	if packageJson == nil {
 		pkgJson = PackageJson{
+			Rev:      uuid.New().String(),
 			Name:     req.Name,
 			Versions: make(map[string]PackageVersion),
 			DistTags: struct {
@@ -213,9 +291,23 @@ func convertPkgJson(req requests.UploadPackageRequest, packageJson *PackageJson)
 			Attachments: map[string]struct {
 				Shasum string `json:"shasum"`
 			}{},
+			Time: map[string]time.Time{
+				"created": time.Now(),
+			},
 		}
 	} else {
 		pkgJson = *packageJson
+		v1, err := semver.NewVersion(req.Versions[req.DistTags.Latest].Version)
+		if err != nil {
+			return pkgJson, err
+		}
+		v2, err := semver.NewVersion(pkgJson.Versions[pkgJson.DistTags.Latest].Version)
+		if err != nil {
+			return pkgJson, err
+		}
+		if v1.GreaterThan(v2) {
+			pkgJson.DistTags.Latest = req.DistTags.Latest
+		}
 	}
 
 	for version, uploadVersion := range req.Versions {
@@ -232,9 +324,7 @@ func convertPkgJson(req requests.UploadPackageRequest, packageJson *PackageJson)
 			Author: struct {
 				Name  string `json:"name"`
 				Email string `json:"email"`
-			}{
-				Name: uploadVersion.Author, // Assuming Author is just a name in UploadPackageRequest
-			},
+			}{},
 			License:     uploadVersion.License,
 			Id:          uploadVersion.ID,
 			NodeVersion: uploadVersion.NodeVersion,
@@ -250,6 +340,8 @@ func convertPkgJson(req requests.UploadPackageRequest, packageJson *PackageJson)
 			},
 		}
 		pkgJson.Versions[version] = pkgVersion
+		pkgJson.Time["modified"] = time.Now()
+		pkgJson.Time[version] = time.Now()
 	}
 
 	for key, attachment := range req.Attachments {
@@ -259,6 +351,5 @@ func convertPkgJson(req requests.UploadPackageRequest, packageJson *PackageJson)
 			Shasum: attachment.Data, // Assuming the data field contains the shasum
 		}
 	}
-
-	return pkgJson
+	return pkgJson, nil
 }

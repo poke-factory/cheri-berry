@@ -20,7 +20,8 @@ func SetupRouter() *gin.Engine {
 	r.Use(middlewares.AuthMiddleware())
 	r.PUT(":package", handlers.UploadPackage)
 	r.PUT(":package/-rev/:rev", handlers.DeletePackageInfo)
-	r.DELETE(":package/-/:file/-rev/:rev", handlers.DeletePackage)
+	r.DELETE(":package/-rev/:rev", handlers.DeletePackage)
+	r.DELETE(":package/-/:file/-rev/:rev", handlers.DeletePackageVersion)
 	prefix.Use(middlewares.AuthMiddleware())
 	prefix.GET("whoami", handlers.GetUserInfo)
 

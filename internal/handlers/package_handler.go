@@ -156,6 +156,25 @@ func DeletePackageInfo(c *gin.Context) {
 
 func DeletePackage(c *gin.Context) {
 	packageName := c.Param("package")
+	files, err := storage.Storage.Files(context.TODO(), fmt.Sprintf("cheri-berry/%s", packageName))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	for _, file := range files {
+		err = storage.Storage.Delete(context.Background(), file.Key())
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "package deleted"})
+}
+
+func DeletePackageVersion(c *gin.Context) {
+	packageName := c.Param("package")
 	fileName := c.Param("file")
 
 	err := storage.Storage.Delete(context.TODO(), fmt.Sprintf("cheri-berry/%s/%s", packageName, fileName))
@@ -216,7 +235,7 @@ func DeletePackage(c *gin.Context) {
 		return
 
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "package deleted"})
+	c.JSON(http.StatusOK, gin.H{"message": "version deleted"})
 }
 
 func GetPackageInfo(c *gin.Context) {
